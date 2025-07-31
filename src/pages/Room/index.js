@@ -158,6 +158,8 @@ export default function Room() {
               playsInline
               muted={false}
               style={{objectFit: 'cover', width: '100%', height: '100%'}}
+              onLoadedMetadata={() => console.log('Video loaded for peer:', clientID)}
+              onError={(e) => console.error('Video error for peer:', clientID, e)}
             />
             <div style={{
               position: 'absolute',
