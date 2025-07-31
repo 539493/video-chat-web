@@ -40,6 +40,7 @@ export default function useWebRTC(roomID, userName) {
 
       peerConnections.current[peerID].onicecandidate = event => {
         if (event.candidate) {
+          console.log('Sending ICE candidate for peer:', peerID, event.candidate);
           socket.emit(ACTIONS.RELAY_ICE, {
             peerID,
             iceCandidate: event.candidate,
@@ -47,19 +48,34 @@ export default function useWebRTC(roomID, userName) {
         }
       }
 
+      peerConnections.current[peerID].oniceconnectionstatechange = () => {
+        console.log('ICE connection state for peer', peerID, ':', peerConnections.current[peerID].iceConnectionState);
+      }
+
+      peerConnections.current[peerID].onconnectionstatechange = () => {
+        console.log('Connection state for peer', peerID, ':', peerConnections.current[peerID].connectionState);
+      }
+
       peerConnections.current[peerID].ontrack = ({streams: [remoteStream]}) => {
-        console.log('Received remote stream for peer:', peerID);
+        console.log('Received remote stream for peer:', peerID, remoteStream);
+        
+        // Создаем новый MediaStream для каждого трека
+        const newStream = new MediaStream();
+        remoteStream.getTracks().forEach(track => {
+          newStream.addTrack(track);
+        });
+        
         addNewClient(peerID, () => {
           if (peerMediaElements.current[peerID]) {
-            peerMediaElements.current[peerID].srcObject = remoteStream;
-            console.log('Set srcObject for peer:', peerID);
+            peerMediaElements.current[peerID].srcObject = newStream;
+            console.log('Set srcObject for peer:', peerID, newStream);
           } else {
             // FIX LONG RENDER IN CASE OF MANY CLIENTS
             let settled = false;
             const interval = setInterval(() => {
               if (peerMediaElements.current[peerID]) {
-                peerMediaElements.current[peerID].srcObject = remoteStream;
-                console.log('Set srcObject for peer (delayed):', peerID);
+                peerMediaElements.current[peerID].srcObject = newStream;
+                console.log('Set srcObject for peer (delayed):', peerID, newStream);
                 settled = true;
               }
 
@@ -96,22 +112,30 @@ export default function useWebRTC(roomID, userName) {
 
   useEffect(() => {
     async function setRemoteMedia({peerID, sessionDescription: remoteDescription}) {
+      console.log('Received SDP for peer:', peerID, remoteDescription.type);
+      
       if (!peerConnections.current[peerID]) {
         console.warn('Peer connection not found for:', peerID);
         return;
       }
 
-      await peerConnections.current[peerID].setRemoteDescription(
-        new RTCSessionDescription(remoteDescription)
-      );
+      try {
+        await peerConnections.current[peerID].setRemoteDescription(
+          new RTCSessionDescription(remoteDescription)
+        );
+        console.log('Remote description set for peer:', peerID);
 
-      if (remoteDescription.type === 'offer') {
-        const answer = await peerConnections.current[peerID].createAnswer();
-        await peerConnections.current[peerID].setLocalDescription(answer);
-        socket.emit(ACTIONS.RELAY_SDP, {
-          peerID,
-          sessionDescription: answer,
-        });
+        if (remoteDescription.type === 'offer') {
+          const answer = await peerConnections.current[peerID].createAnswer();
+          await peerConnections.current[peerID].setLocalDescription(answer);
+          console.log('Sending answer for peer:', peerID);
+          socket.emit(ACTIONS.RELAY_SDP, {
+            peerID,
+            sessionDescription: answer,
+          });
+        }
+      } catch (err) {
+        console.error('Error setting remote description for peer:', peerID, err);
       }
     }
 
@@ -124,10 +148,17 @@ export default function useWebRTC(roomID, userName) {
 
   useEffect(() => {
     socket.on(ACTIONS.ICE_CANDIDATE, ({peerID, iceCandidate}) => {
+      console.log('Received ICE candidate for peer:', peerID, iceCandidate);
       if (peerConnections.current[peerID]) {
         peerConnections.current[peerID].addIceCandidate(
           new RTCIceCandidate(iceCandidate)
-        );
+        ).then(() => {
+          console.log('ICE candidate added successfully for peer:', peerID);
+        }).catch(err => {
+          console.error('Error adding ICE candidate for peer:', peerID, err);
+        });
+      } else {
+        console.warn('Peer connection not found for ICE candidate:', peerID);
       }
     });
 
