@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: video-chat-webrtc
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production 
