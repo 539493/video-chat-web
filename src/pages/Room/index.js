@@ -48,7 +48,6 @@ export default function Room() {
   const searchParams = new URLSearchParams(location.search);
   const userName = searchParams.get('name') || 'Гость';
   const {clients, provideMediaRef, isScreenSharing, startScreenShare, stopScreenShare, isAudioEnabled, isVideoEnabled, toggleAudio, toggleVideo} = useWebRTC(roomID, userName);
-  const videoLayout = layout(clients.length);
 
   // Определяем своё видео
   const selfVideo = clients.find(id => id === LOCAL_VIDEO);
@@ -194,7 +193,6 @@ export default function Room() {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          position: 'fixed',
         }}>
           <video
             width='100%'
