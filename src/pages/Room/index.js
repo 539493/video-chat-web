@@ -44,6 +44,9 @@ const ICONS = {
 
 export default function Room() {
   const {id: roomID} = useParams();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const userName = searchParams.get('name') || 'Гость';
   const {clients, provideMediaRef, isScreenSharing, startScreenShare, stopScreenShare, isAudioEnabled, isVideoEnabled, toggleAudio, toggleVideo} = useWebRTC(roomID, userName);
   const videoLayout = layout(clients.length);
 
@@ -55,9 +58,6 @@ export default function Room() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef(null);
-  const location = useLocation();
-  const searchParams = new URLSearchParams(location.search);
-  const userName = searchParams.get('name') || 'Гость';
   const history = useHistory();
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [isUsersOpen, setIsUsersOpen] = useState(false);
