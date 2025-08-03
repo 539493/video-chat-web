@@ -160,7 +160,6 @@ export default function Room() {
               onLoadedMetadata={() => console.log('Video loaded for peer:', clientID)}
               onError={(e) => console.error('Video error for peer:', clientID, e)}
               onCanPlay={() => console.log('Video can play for peer:', clientID)}
-              onPlay={() => console.log('Video started playing for peer:', clientID)}
             />
             <div style={{
               position: 'absolute',
