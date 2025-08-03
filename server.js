@@ -3,7 +3,13 @@ const express = require('express');
 const app = express();
 const http = require('http');
 const server = http.createServer(app);
-const io = require('socket.io')(server);
+const io = require('socket.io')(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  },
+  transports: ['websocket', 'polling']
+});
 const {version, validate} = require('uuid');
 
 const ACTIONS = require('./src/socket/actions');
@@ -23,6 +29,7 @@ function shareRoomsInfo() {
 }
 
 io.on('connection', socket => {
+  console.log('Client connected:', socket.id);
   shareRoomsInfo();
 
   socket.on(ACTIONS.JOIN, config => {
@@ -30,19 +37,23 @@ io.on('connection', socket => {
     const {rooms: joinedRooms} = socket;
 
     userNames[socket.id] = name || 'Гость';
+    console.log(`User ${name} (${socket.id}) joining room: ${roomID}`);
 
     if (Array.from(joinedRooms).includes(roomID)) {
       return console.warn(`Already joined to ${roomID}`);
     }
 
     const clients = Array.from(io.sockets.adapter.rooms.get(roomID) || []);
+    console.log(`Room ${roomID} has ${clients.length} clients`);
 
     clients.forEach(clientID => {
+      console.log(`Notifying ${clientID} about new peer ${socket.id}`);
       io.to(clientID).emit(ACTIONS.ADD_PEER, {
         peerID: socket.id,
         createOffer: false
       });
 
+      console.log(`Notifying ${socket.id} about existing peer ${clientID}`);
       socket.emit(ACTIONS.ADD_PEER, {
         peerID: clientID,
         createOffer: true,
@@ -57,6 +68,7 @@ io.on('connection', socket => {
 
   socket.on(ACTIONS.SET_USER_NAME, ({name}) => {
     userNames[socket.id] = name;
+    console.log(`User ${socket.id} changed name to: ${name}`);
     // Обновляем всем
     Object.values(socket.rooms).forEach(roomID => {
       io.to(roomID).emit(ACTIONS.UPDATE_USER_NAMES, userNames);
@@ -72,13 +84,16 @@ io.on('connection', socket => {
       .forEach(roomID => {
 
         const clients = Array.from(io.sockets.adapter.rooms.get(roomID) || []);
+        console.log(`User ${socket.id} leaving room ${roomID}, notifying ${clients.length} clients`);
 
         clients
           .forEach(clientID => {
+          console.log(`Notifying ${clientID} about peer ${socket.id} leaving`);
           io.to(clientID).emit(ACTIONS.REMOVE_PEER, {
             peerID: socket.id,
           });
 
+          console.log(`Notifying ${socket.id} about peer ${clientID} leaving`);
           socket.emit(ACTIONS.REMOVE_PEER, {
             peerID: clientID,
           });
@@ -93,10 +108,12 @@ io.on('connection', socket => {
   socket.on(ACTIONS.LEAVE, leaveRoom);
   socket.on('disconnecting', leaveRoom);
   socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
     delete userNames[socket.id];
   });
 
   socket.on(ACTIONS.RELAY_SDP, ({peerID, sessionDescription}) => {
+    console.log(`Relaying SDP from ${socket.id} to ${peerID}, type: ${sessionDescription.type}`);
     io.to(peerID).emit(ACTIONS.SESSION_DESCRIPTION, {
       peerID: socket.id,
       sessionDescription,
@@ -104,6 +121,7 @@ io.on('connection', socket => {
   });
 
   socket.on(ACTIONS.RELAY_ICE, ({peerID, iceCandidate}) => {
+    console.log(`Relaying ICE candidate from ${socket.id} to ${peerID}, type: ${iceCandidate.type}`);
     io.to(peerID).emit(ACTIONS.ICE_CANDIDATE, {
       peerID: socket.id,
       iceCandidate,
@@ -112,6 +130,7 @@ io.on('connection', socket => {
 
   // ЧАТ: пересылка сообщений всем в комнате
   socket.on(ACTIONS.SEND_CHAT_MESSAGE, ({roomID, message, author}) => {
+    console.log(`Chat message from ${author} in room ${roomID}: ${message}`);
     // Отправить всем в комнате, кроме отправителя
     socket.to(roomID).emit(ACTIONS.RECEIVE_CHAT_MESSAGE, {
       message,

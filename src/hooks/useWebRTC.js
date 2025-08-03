@@ -6,6 +6,31 @@ import ACTIONS from '../socket/actions';
 
 export const LOCAL_VIDEO = 'LOCAL_VIDEO';
 
+// TURN серверы для обхода NAT и файрволов
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  // Добавляем TURN серверы для обхода строгих файрволов
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject'
+  }
+];
+
 export default function useWebRTC(roomID, userName) {
   const [clients, updateClients] = useStateWithCallback([]);
 
@@ -36,12 +61,18 @@ export default function useWebRTC(roomID, userName) {
 
       console.log('Creating new peer connection for:', peerID);
       peerConnections.current[peerID] = new RTCPeerConnection({
-        iceServers: freeice(),
+        iceServers: ICE_SERVERS,
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        // Улучшаем настройки для лучшей совместимости
+        sdpSemantics: 'unified-plan'
       });
 
       peerConnections.current[peerID].onicecandidate = event => {
         if (event.candidate) {
-          console.log('Sending ICE candidate to:', peerID);
+          console.log('Sending ICE candidate to:', peerID, 'type:', event.candidate.type);
           socket.emit(ACTIONS.RELAY_ICE, {
             peerID,
             iceCandidate: event.candidate,
@@ -55,6 +86,10 @@ export default function useWebRTC(roomID, userName) {
 
       peerConnections.current[peerID].oniceconnectionstatechange = () => {
         console.log('ICE connection state for peer', peerID, ':', peerConnections.current[peerID].iceConnectionState);
+      };
+
+      peerConnections.current[peerID].onicegatheringstatechange = () => {
+        console.log('ICE gathering state for peer', peerID, ':', peerConnections.current[peerID].iceGatheringState);
       };
 
       peerConnections.current[peerID].ontrack = ({streams: [remoteStream]}) => {
@@ -102,7 +137,11 @@ export default function useWebRTC(roomID, userName) {
 
       if (createOffer) {
         console.log('Creating offer for peer:', peerID);
-        const offer = await peerConnections.current[peerID].createOffer();
+        const offer = await peerConnections.current[peerID].createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+          voiceActivityDetection: true
+        });
         await peerConnections.current[peerID].setLocalDescription(offer);
         socket.emit(ACTIONS.RELAY_SDP, {
           peerID,
@@ -132,7 +171,11 @@ export default function useWebRTC(roomID, userName) {
 
       if (remoteDescription.type === 'offer') {
         console.log('Creating answer for peer:', peerID);
-        const answer = await peerConnections.current[peerID].createAnswer();
+        const answer = await peerConnections.current[peerID].createAnswer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+          voiceActivityDetection: true
+        });
         await peerConnections.current[peerID].setLocalDescription(answer);
         socket.emit(ACTIONS.RELAY_SDP, {
           peerID,
@@ -151,10 +194,12 @@ export default function useWebRTC(roomID, userName) {
   useEffect(() => {
     socket.on(ACTIONS.ICE_CANDIDATE, ({peerID, iceCandidate}) => {
       if (peerConnections.current[peerID]) {
-        console.log('Adding ICE candidate for peer:', peerID);
+        console.log('Adding ICE candidate for peer:', peerID, 'type:', iceCandidate.type);
         peerConnections.current[peerID].addIceCandidate(
           new RTCIceCandidate(iceCandidate)
-        );
+        ).catch(e => {
+          console.error('Error adding ICE candidate:', e);
+        });
       }
     });
 
@@ -191,13 +236,17 @@ export default function useWebRTC(roomID, userName) {
           audio: {
             echoCancellation: true,
             noiseSuppression: true,
+            autoGainControl: true,
             sampleRate: 48000,
+            channelCount: 2,
           },
           video: {
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
             frameRate: { ideal: 30, max: 60 },
             facingMode: 'user',
+            // Улучшаем качество видео
+            aspectRatio: { ideal: 16/9 },
           }
         });
 
