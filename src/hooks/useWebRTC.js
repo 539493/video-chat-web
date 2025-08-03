@@ -6,21 +6,45 @@ import ACTIONS from '../socket/actions';
 
 export const LOCAL_VIDEO = 'LOCAL_VIDEO';
 
-// TURN серверы для обхода NAT и файрволов
-const ICE_SERVERS = [
-  // Google STUN серверы
+// Функция для получения TURN серверов от внешнего API
+const getTurnServers = async () => {
+  try {
+    // Используем бесплатный API для получения TURN серверов
+    const response = await fetch('https://api.xirsys.com/getIceServers', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ident: 'your_username',
+        secret: 'your_secret',
+        domain: 'your_domain',
+        application: 'default',
+        room: 'default',
+        secure: 1
+      })
+    });
+    
+    const data = await response.json();
+    return data.d.iceServers;
+  } catch (error) {
+    console.warn('Failed to get TURN servers from API, using fallback:', error);
+    return null;
+  }
+};
+
+// Базовые STUN серверы
+const BASE_STUN_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
-  // Дополнительные STUN серверы
   { urls: 'stun:stun.stunprotocol.org:3478' },
-  { urls: 'stun:stun.voiparound.com:3478' },
-  { urls: 'stun:stun.voipbuster.com:3478' },
-  { urls: 'stun:stun.voipstunt.com:3478' },
-  { urls: 'stun:stun.voxgratia.org:3478' },
-  // TURN серверы для обхода строгих файрволов
+];
+
+// Fallback TURN серверы
+const FALLBACK_TURN_SERVERS = [
   {
     urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject',
@@ -36,7 +60,6 @@ const ICE_SERVERS = [
     username: 'openrelayproject',
     credential: 'openrelayproject'
   },
-  // Дополнительные TURN серверы
   {
     urls: 'turn:turn.voiparound.com:3478',
     username: 'webrtc',
@@ -51,6 +74,19 @@ const ICE_SERVERS = [
 
 export default function useWebRTC(roomID, userName) {
   const [clients, updateClients] = useStateWithCallback([]);
+  const [iceServers, setIceServers] = useState([...BASE_STUN_SERVERS, ...FALLBACK_TURN_SERVERS]);
+
+  // Получаем TURN серверы при инициализации
+  useEffect(() => {
+    getTurnServers().then(servers => {
+      if (servers && servers.length > 0) {
+        console.log('Using TURN servers from API');
+        setIceServers([...BASE_STUN_SERVERS, ...servers]);
+      } else {
+        console.log('Using fallback TURN servers');
+      }
+    });
+  }, []);
 
   const addNewClient = useCallback((newClient, cb) => {
     updateClients(list => {
@@ -77,14 +113,13 @@ export default function useWebRTC(roomID, userName) {
         return console.warn(`Already connected to peer ${peerID}`);
       }
 
-      console.log('Creating new peer connection for:', peerID);
+      console.log('Creating new peer connection for:', peerID, 'with', iceServers.length, 'ICE servers');
       peerConnections.current[peerID] = new RTCPeerConnection({
-        iceServers: ICE_SERVERS,
+        iceServers: iceServers,
         iceCandidatePoolSize: 10,
         iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
         rtcpMuxPolicy: 'require',
-        // Улучшаем настройки для лучшей совместимости
         sdpSemantics: 'unified-plan'
       });
 
@@ -127,18 +162,15 @@ export default function useWebRTC(roomID, userName) {
       peerConnections.current[peerID].ontrack = ({streams: [remoteStream]}) => {
         console.log('Received remote stream for peer:', peerID, 'tracks:', remoteStream.getTracks().length);
         
-        // Добавляем клиента сразу при получении трека
         addNewClient(peerID, () => {
           if (peerMediaElements.current[peerID]) {
             peerMediaElements.current[peerID].srcObject = remoteStream;
             console.log('Set srcObject for peer:', peerID);
             
-            // Убеждаемся, что видео воспроизводится
             peerMediaElements.current[peerID].play().catch(e => 
               console.error('Error playing video for peer:', peerID, e)
             );
           } else {
-            // FIX LONG RENDER IN CASE OF MANY CLIENTS
             let settled = false;
             const interval = setInterval(() => {
               if (peerMediaElements.current[peerID]) {
@@ -187,7 +219,7 @@ export default function useWebRTC(roomID, userName) {
     return () => {
       socket.off(ACTIONS.ADD_PEER);
     }
-  }, [addNewClient]);
+  }, [addNewClient, iceServers]);
 
   useEffect(() => {
     async function setRemoteMedia({peerID, sessionDescription: remoteDescription}) {
@@ -323,7 +355,7 @@ export default function useWebRTC(roomID, userName) {
       
       // Создаем новое соединение
       peerConnections.current[peerID] = new RTCPeerConnection({
-        iceServers: ICE_SERVERS,
+        iceServers: iceServers,
         iceCandidatePoolSize: 10,
         iceTransportPolicy: 'all',
         bundlePolicy: 'max-bundle',
@@ -349,7 +381,33 @@ export default function useWebRTC(roomID, userName) {
         sessionDescription: offer,
       });
     }
-  }, []);
+  }, [iceServers]);
+
+  // Функция для тестирования соединения
+  const testConnection = useCallback(async () => {
+    console.log('Testing WebRTC connection...');
+    
+    try {
+      const testConnection = new RTCPeerConnection({
+        iceServers: iceServers,
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        sdpSemantics: 'unified-plan'
+      });
+
+      const testOffer = await testConnection.createOffer();
+      await testConnection.setLocalDescription(testOffer);
+      
+      console.log('✅ WebRTC connection test successful');
+      testConnection.close();
+      return true;
+    } catch (error) {
+      console.error('❌ WebRTC connection test failed:', error);
+      return false;
+    }
+  }, [iceServers]);
 
   // Запуск демонстрации экрана
   const startScreenShare = async () => {
