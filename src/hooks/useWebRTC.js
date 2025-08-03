@@ -8,12 +8,19 @@ export const LOCAL_VIDEO = 'LOCAL_VIDEO';
 
 // TURN серверы для обхода NAT и файрволов
 const ICE_SERVERS = [
+  // Google STUN серверы
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun3.l.google.com:19302' },
   { urls: 'stun:stun4.l.google.com:19302' },
-  // Добавляем TURN серверы для обхода строгих файрволов
+  // Дополнительные STUN серверы
+  { urls: 'stun:stun.stunprotocol.org:3478' },
+  { urls: 'stun:stun.voiparound.com:3478' },
+  { urls: 'stun:stun.voipbuster.com:3478' },
+  { urls: 'stun:stun.voipstunt.com:3478' },
+  { urls: 'stun:stun.voxgratia.org:3478' },
+  // TURN серверы для обхода строгих файрволов
   {
     urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject',
@@ -28,6 +35,17 @@ const ICE_SERVERS = [
     urls: 'turn:openrelay.metered.ca:443?transport=tcp',
     username: 'openrelayproject',
     credential: 'openrelayproject'
+  },
+  // Дополнительные TURN серверы
+  {
+    urls: 'turn:turn.voiparound.com:3478',
+    username: 'webrtc',
+    credential: 'webrtc'
+  },
+  {
+    urls: 'turn:turn.voipstunt.com:3478',
+    username: 'webrtc',
+    credential: 'webrtc'
   }
 ];
 
@@ -72,7 +90,7 @@ export default function useWebRTC(roomID, userName) {
 
       peerConnections.current[peerID].onicecandidate = event => {
         if (event.candidate) {
-          console.log('Sending ICE candidate to:', peerID, 'type:', event.candidate.type);
+          console.log('Sending ICE candidate to:', peerID, 'type:', event.candidate.type, 'protocol:', event.candidate.protocol);
           socket.emit(ACTIONS.RELAY_ICE, {
             peerID,
             iceCandidate: event.candidate,
@@ -81,11 +99,25 @@ export default function useWebRTC(roomID, userName) {
       }
 
       peerConnections.current[peerID].onconnectionstatechange = () => {
-        console.log('Connection state for peer', peerID, ':', peerConnections.current[peerID].connectionState);
+        const state = peerConnections.current[peerID].connectionState;
+        console.log('Connection state for peer', peerID, ':', state);
+        
+        if (state === 'connected') {
+          console.log('✅ WebRTC connection established with peer:', peerID);
+        } else if (state === 'failed') {
+          console.error('❌ WebRTC connection failed with peer:', peerID);
+        }
       };
 
       peerConnections.current[peerID].oniceconnectionstatechange = () => {
-        console.log('ICE connection state for peer', peerID, ':', peerConnections.current[peerID].iceConnectionState);
+        const state = peerConnections.current[peerID].iceConnectionState;
+        console.log('ICE connection state for peer', peerID, ':', state);
+        
+        if (state === 'connected' || state === 'completed') {
+          console.log('✅ ICE connection established with peer:', peerID);
+        } else if (state === 'failed') {
+          console.error('❌ ICE connection failed with peer:', peerID);
+        }
       };
 
       peerConnections.current[peerID].onicegatheringstatechange = () => {
@@ -280,6 +312,43 @@ export default function useWebRTC(roomID, userName) {
   const provideMediaRef = useCallback((id, node) => {
     peerMediaElements.current[id] = node;
     console.log('Media ref provided for:', id);
+  }, []);
+
+  // Функция для принудительного переподключения
+  const reconnectPeer = useCallback(async (peerID) => {
+    if (peerConnections.current[peerID]) {
+      console.log('Attempting to reconnect to peer:', peerID);
+      peerConnections.current[peerID].close();
+      delete peerConnections.current[peerID];
+      
+      // Создаем новое соединение
+      peerConnections.current[peerID] = new RTCPeerConnection({
+        iceServers: ICE_SERVERS,
+        iceCandidatePoolSize: 10,
+        iceTransportPolicy: 'all',
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require',
+        sdpSemantics: 'unified-plan'
+      });
+
+      // Повторяем настройку соединения
+      if (localMediaStream.current) {
+        localMediaStream.current.getTracks().forEach(track => {
+          peerConnections.current[peerID].addTrack(track, localMediaStream.current);
+        });
+      }
+
+      const offer = await peerConnections.current[peerID].createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true,
+        voiceActivityDetection: true
+      });
+      await peerConnections.current[peerID].setLocalDescription(offer);
+      socket.emit(ACTIONS.RELAY_SDP, {
+        peerID,
+        sessionDescription: offer,
+      });
+    }
   }, []);
 
   // Запуск демонстрации экрана

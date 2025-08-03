@@ -47,7 +47,7 @@ export default function Room() {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const userName = searchParams.get('name') || 'Гость';
-  const {clients, provideMediaRef, isScreenSharing, startScreenShare, stopScreenShare, isAudioEnabled, isVideoEnabled, toggleAudio, toggleVideo} = useWebRTC(roomID, userName);
+  const {clients, provideMediaRef, isScreenSharing, startScreenShare, stopScreenShare, isAudioEnabled, isVideoEnabled, toggleAudio, toggleVideo, reconnectPeer} = useWebRTC(roomID, userName);
 
   // Определяем своё видео
   const selfVideo = clients.find(id => id === LOCAL_VIDEO);
@@ -239,6 +239,11 @@ export default function Room() {
         <button style={{
           background: isUsersOpen ? '#3b4a5c' : '#2d3a4b', color: '#fff', border: 'none', borderRadius: '10px', width: 48, height: 48, fontSize: 24, cursor: 'pointer', marginRight: 8
         }} onClick={() => setIsUsersOpen(v => !v)}>{ICONS.users}</button>
+        <button style={{
+          background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '10px', width: 48, height: 48, fontSize: 16, cursor: 'pointer', marginRight: 8
+        }} onClick={() => {
+          otherVideos.forEach(clientID => reconnectPeer(clientID));
+        }} title="Переподключиться">🔄</button>
         <button style={{
           background: isChatOpen ? '#3b4a5c' : '#2d3a4b', color: '#fff', border: 'none', borderRadius: '10px', width: 48, height: 48, fontSize: 24, cursor: 'pointer', marginRight: 8
         }} onClick={() => setIsChatOpen((v) => !v)}>{ICONS.chat}</button>
